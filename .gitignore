@@ -216,3 +216,5 @@ IsaacSim-ros_workspaces/jazzy_ws/log
 IsaacSim-ros_workspaces/build_ws/jazzy
 IsaacSim-ros_workspaces/build_ws/humble
 .*.pyc
+
+env_isaaclab/
