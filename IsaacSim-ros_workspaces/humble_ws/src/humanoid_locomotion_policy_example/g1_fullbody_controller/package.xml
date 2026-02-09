@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>g1_fullbody_controller</name>
+  <version>0.1.0</version>
+  <description>This package implements a fullbody controller for the Unitree G1 humanoid robot
+    with Inspire hands (53 joints) using a neural network policy. The policy was trained using
+    Isaac Lab with the Isaac-Velocity-Flat-G1-Inspire-v0 task. This package requires PyTorch 2.3.0
+    and higher, please refer to the PyTorch website for installation instructions.</description>
+  <maintainer email="isaac-sim-maintainers@nvidia.com">Isaac Sim</maintainer>
+
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Messages dependencies -->
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <build_depend>launch</build_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

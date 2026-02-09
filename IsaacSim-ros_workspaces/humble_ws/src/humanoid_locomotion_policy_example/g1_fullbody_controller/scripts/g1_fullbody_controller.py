@@ -15,6 +15,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Fullbody controller for G1 humanoid robot with Inspire hands (29 DoF body + 24 hand DoF = 53 joints).
+
+Adapted from h1_fullbody_controller.py for the Unitree G1 robot trained with
+Isaac Lab using the Isaac-Velocity-Flat-G1-Inspire-v0 task.
+
+Key differences from H1:
+- 53 joints total (vs 19 for H1) including finger joints
+- Different joint ordering following the USD kinematic tree
+- Different default standing pose (init height 0.74m vs 1.05m)
+- Observation vector is 171-dimensional (vs 69 for H1)
+- Policy trained with Isaac Lab (isaaclab.*) not omni.isaac.lab
+"""
+
 import rclpy
 import torch
 import numpy as np
@@ -30,16 +43,100 @@ class G1FullbodyController(Node):
     """Fullbody controller for G1 humanoid robot with Inspire hands.
 
     This ROS 2 node subscribes to velocity commands and synchronized joint/IMU
-    data, processes the data through a neural network policy trained in IsaacLab,
-    and publishes joint commands for controlling the G1 robot's movements.
+    data, processes the data through a neural network policy, and publishes
+    joint commands for controlling the G1 robot's movements.
 
-    The policy was trained using IsaacLab with the Isaac-Velocity-Flat-G1-Inspire-v0
-    environment configuration.
+    The policy controls all 53 joints (legs, arms, waist, and hands) using
+    position control with PD actuators.
     """
 
-    # Number of joints in the G1 with Inspire hands
+    # -------------------------------------------------------------------------
+    # Joint configuration for G1 with Inspire hands (53 joints)
+    # Order follows the USD kinematic tree traversal in Isaac Lab.
+    # -------------------------------------------------------------------------
+    JOINT_NAMES = [
+        "waist_pitch_joint",           # [0]  Waist
+        "left_shoulder_pitch_joint",   # [1]  Left Arm
+        "right_shoulder_pitch_joint",  # [2]  Right Arm
+        "waist_roll_joint",            # [3]  Waist
+        "left_shoulder_roll_joint",    # [4]  Left Arm
+        "right_shoulder_roll_joint",   # [5]  Right Arm
+        "waist_yaw_joint",             # [6]  Waist
+        "left_shoulder_yaw_joint",     # [7]  Left Arm
+        "right_shoulder_yaw_joint",    # [8]  Right Arm
+        "left_hip_pitch_joint",        # [9]  Left Leg
+        "right_hip_pitch_joint",       # [10] Right Leg
+        "left_elbow_joint",            # [11] Left Arm
+        "right_elbow_joint",           # [12] Right Arm
+        "left_hip_roll_joint",         # [13] Left Leg
+        "right_hip_roll_joint",        # [14] Right Leg
+        "left_wrist_roll_joint",       # [15] Left Arm
+        "right_wrist_roll_joint",      # [16] Right Arm
+        "left_hip_yaw_joint",          # [17] Left Leg
+        "right_hip_yaw_joint",         # [18] Right Leg
+        "left_wrist_pitch_joint",      # [19] Left Arm
+        "right_wrist_pitch_joint",     # [20] Right Arm
+        "left_knee_joint",             # [21] Left Leg
+        "right_knee_joint",            # [22] Right Leg
+        "left_wrist_yaw_joint",        # [23] Left Arm
+        "right_wrist_yaw_joint",       # [24] Right Arm
+        "left_ankle_pitch_joint",      # [25] Left Leg
+        "right_ankle_pitch_joint",     # [26] Right Leg
+        "L_index_proximal_joint",      # [27] Left Hand
+        "L_middle_proximal_joint",     # [28] Left Hand
+        "L_pinky_proximal_joint",      # [29] Left Hand
+        "L_ring_proximal_joint",       # [30] Left Hand
+        "L_thumb_proximal_yaw_joint",  # [31] Left Hand
+        "R_index_proximal_joint",      # [32] Right Hand
+        "R_middle_proximal_joint",     # [33] Right Hand
+        "R_pinky_proximal_joint",      # [34] Right Hand
+        "R_ring_proximal_joint",       # [35] Right Hand
+        "R_thumb_proximal_yaw_joint",  # [36] Right Hand
+        "left_ankle_roll_joint",       # [37] Left Leg
+        "right_ankle_roll_joint",      # [38] Right Leg
+        "L_index_intermediate_joint",  # [39] Left Hand
+        "L_middle_intermediate_joint", # [40] Left Hand
+        "L_pinky_intermediate_joint",  # [41] Left Hand
+        "L_ring_intermediate_joint",   # [42] Left Hand
+        "L_thumb_proximal_pitch_joint",# [43] Left Hand
+        "R_index_intermediate_joint",  # [44] Right Hand
+        "R_middle_intermediate_joint", # [45] Right Hand
+        "R_pinky_intermediate_joint",  # [46] Right Hand
+        "R_ring_intermediate_joint",   # [47] Right Hand
+        "R_thumb_proximal_pitch_joint",# [48] Right Hand
+        "L_thumb_intermediate_joint",  # [49] Left Hand
+        "R_thumb_intermediate_joint",  # [50] Right Hand
+        "L_thumb_distal_joint",        # [51] Left Hand
+        "R_thumb_distal_joint",        # [52] Right Hand
+    ]
+
     NUM_JOINTS = 53
-    # Observation dimensions: 3 lin_vel + 3 ang_vel + 3 gravity + 3 cmd_vel + 53 joint_pos + 53 joint_vel + 53 actions
+
+    # Default standing pose (non-zero values only)
+    # From G1_INSPIRE_LOCOMOTION_CFG init_state in Isaac Lab
+    DEFAULT_JOINT_POS_DICT = {
+        "left_shoulder_pitch_joint": 0.35,
+        "right_shoulder_pitch_joint": 0.35,
+        "left_shoulder_roll_joint": 0.16,
+        "right_shoulder_roll_joint": -0.16,
+        "left_hip_pitch_joint": -0.20,
+        "right_hip_pitch_joint": -0.20,
+        "left_elbow_joint": 0.87,
+        "right_elbow_joint": 0.87,
+        "left_knee_joint": 0.42,
+        "right_knee_joint": 0.42,
+        "left_ankle_pitch_joint": -0.23,
+        "right_ankle_pitch_joint": -0.23,
+    }
+
+    # Observation vector layout (171 dimensions total):
+    #   [0:3]     base_lin_vel      (3)
+    #   [3:6]     base_ang_vel      (3)
+    #   [6:9]     projected_gravity (3)
+    #   [9:12]    velocity_commands  (3)
+    #   [12:65]   joint_pos_rel     (53)
+    #   [65:118]  joint_vel_rel     (53)
+    #   [118:171] last_action       (53)
     OBS_DIM = 171
 
     def __init__(self):
@@ -95,7 +192,8 @@ class G1FullbodyController(Node):
         queue_size = 10
         subscribers = [self._joint_states_sub_filter, self._imu_sub_filter]
 
-        # Time synchronizer to ensure joint state and IMU data are processed together
+        # Time synchronizer to ensure joint state and IMU data are processed
+        # together
         self.sync = TimeSynchronizer(subscribers, queue_size)
         self.sync.registerCallback(self._tick)
 
@@ -108,133 +206,25 @@ class G1FullbodyController(Node):
         self._joint_command = JointState()
         self._cmd_vel = Twist()
         self._imu = Imu()
-        self._action_scale = 0.2 # Scale factor for policy output (matches IsaacLab config)
+        self._action_scale = 0.5  # Scale factor for policy output (from env.yaml)
         self._previous_action = np.zeros(self.NUM_JOINTS)
         self._policy_counter = 0
-        self._decimation = 4 # Run policy every 4 ticks (matches IsaacLab config)
+        self._decimation = 4  # Run policy every 4 ticks (from env.yaml decimation=4)
         self._last_tick_time = self.get_clock().now().nanoseconds * 1e-9
         self._lin_vel_b = np.zeros(3)  # Linear velocity in body frame
         self._dt = 0.0  # Time delta between ticks
 
-        # Joint names in the order used by the trained policy (IsaacLab ordering)
-        # This ordering is critical - it must match the order used during training
-        self.joint_names = [
-            'waist_pitch_joint',
-            'left_shoulder_pitch_joint',
-            'right_shoulder_pitch_joint',
-            'waist_roll_joint',
-            'left_shoulder_roll_joint',
-            'right_shoulder_roll_joint',
-            'waist_yaw_joint',
-            'left_shoulder_yaw_joint',
-            'right_shoulder_yaw_joint',
-            'left_hip_pitch_joint',
-            'right_hip_pitch_joint',
-            'left_elbow_joint',
-            'right_elbow_joint',
-            'left_hip_roll_joint',
-            'right_hip_roll_joint',
-            'left_wrist_roll_joint',
-            'right_wrist_roll_joint',
-            'left_hip_yaw_joint',
-            'right_hip_yaw_joint',
-            'left_wrist_pitch_joint',
-            'right_wrist_pitch_joint',
-            'left_knee_joint',
-            'right_knee_joint',
-            'left_wrist_yaw_joint',
-            'right_wrist_yaw_joint',
-            'left_ankle_pitch_joint',
-            'right_ankle_pitch_joint',
-            'L_index_proximal_joint',
-            'L_middle_proximal_joint',
-            'L_pinky_proximal_joint',
-            'L_ring_proximal_joint',
-            'L_thumb_proximal_yaw_joint',
-            'R_index_proximal_joint',
-            'R_middle_proximal_joint',
-            'R_pinky_proximal_joint',
-            'R_ring_proximal_joint',
-            'R_thumb_proximal_yaw_joint',
-            'left_ankle_roll_joint',
-            'right_ankle_roll_joint',
-            'L_index_intermediate_joint',
-            'L_middle_intermediate_joint',
-            'L_pinky_intermediate_joint',
-            'L_ring_intermediate_joint',
-            'L_thumb_proximal_pitch_joint',
-            'R_index_intermediate_joint',
-            'R_middle_intermediate_joint',
-            'R_pinky_intermediate_joint',
-            'R_ring_intermediate_joint',
-            'R_thumb_proximal_pitch_joint',
-            'L_thumb_intermediate_joint',
-            'R_thumb_intermediate_joint',
-            'L_thumb_distal_joint',
-            'R_thumb_distal_joint',
-        ]
-
-        # Default joint positions representing the nominal stance
-        # These values match the init_state from G1_INSPIRE_LOCOMOTION_CFG
-        self.default_pos = np.array([
-            0.0,      # waist_pitch_joint
-            0.35,     # left_shoulder_pitch_joint
-            0.35,     # right_shoulder_pitch_joint
-            0.0,      # waist_roll_joint
-            0.16,     # left_shoulder_roll_joint
-            -0.16,    # right_shoulder_roll_joint
-            0.0,      # waist_yaw_joint
-            0.0,      # left_shoulder_yaw_joint
-            0.0,      # right_shoulder_yaw_joint
-            -0.2,     # left_hip_pitch_joint
-            -0.2,     # right_hip_pitch_joint
-            0.87,     # left_elbow_joint
-            0.87,     # right_elbow_joint
-            0.0,      # left_hip_roll_joint
-            0.0,      # right_hip_roll_joint
-            0.0,      # left_wrist_roll_joint
-            0.0,      # right_wrist_roll_joint
-            0.0,      # left_hip_yaw_joint
-            0.0,      # right_hip_yaw_joint
-            0.0,      # left_wrist_pitch_joint
-            0.0,      # right_wrist_pitch_joint
-            0.42,     # left_knee_joint
-            0.42,     # right_knee_joint
-            0.0,      # left_wrist_yaw_joint
-            0.0,      # right_wrist_yaw_joint
-            -0.23,    # left_ankle_pitch_joint
-            -0.23,    # right_ankle_pitch_joint
-            0.0,      # L_index_proximal_joint
-            0.0,      # L_middle_proximal_joint
-            0.0,      # L_pinky_proximal_joint
-            0.0,      # L_ring_proximal_joint
-            0.0,      # L_thumb_proximal_yaw_joint
-            0.0,      # R_index_proximal_joint
-            0.0,      # R_middle_proximal_joint
-            0.0,      # R_pinky_proximal_joint
-            0.0,      # R_ring_proximal_joint
-            0.0,      # R_thumb_proximal_yaw_joint
-            0.0,      # left_ankle_roll_joint
-            0.0,      # right_ankle_roll_joint
-            0.0,      # L_index_intermediate_joint
-            0.0,      # L_middle_intermediate_joint
-            0.0,      # L_pinky_intermediate_joint
-            0.0,      # L_ring_intermediate_joint
-            0.0,      # L_thumb_proximal_pitch_joint
-            0.0,      # R_index_intermediate_joint
-            0.0,      # R_middle_intermediate_joint
-            0.0,      # R_pinky_intermediate_joint
-            0.0,      # R_ring_intermediate_joint
-            0.0,      # R_thumb_proximal_pitch_joint
-            0.0,      # L_thumb_intermediate_joint
-            0.0,      # R_thumb_intermediate_joint
-            0.0,      # L_thumb_distal_joint
-            0.0,      # R_thumb_distal_joint
-        ])
+        # Build default position array from dictionary
+        self.default_pos = np.zeros(self.NUM_JOINTS)
+        for i, name in enumerate(self.JOINT_NAMES):
+            if name in self.DEFAULT_JOINT_POS_DICT:
+                self.default_pos[i] = self.DEFAULT_JOINT_POS_DICT[name]
 
         self._logger.info("Initializing G1FullbodyController")
-        self._logger.info(f"Number of joints: {self.NUM_JOINTS}")
-        self._logger.info(f"Observation dimension: {self.OBS_DIM}")
+        self._logger.info(f"  Number of joints: {self.NUM_JOINTS}")
+        self._logger.info(f"  Observation dim: {self.OBS_DIM}")
+        self._logger.info(f"  Action scale: {self._action_scale}")
+        self._logger.info(f"  Decimation: {self._decimation}")
 
     def _cmd_vel_callback(self, msg):
         """Store the latest velocity command."""
@@ -266,26 +256,26 @@ class G1FullbodyController(Node):
 
         # Prepare and publish the joint command message
         self._joint_command.header.stamp = self.get_clock().now().to_msg()
-        self._joint_command.name = self.joint_names
+        self._joint_command.name = list(self.JOINT_NAMES)
 
         # Compute final joint positions by adding scaled actions to default positions
         action_pos = self.default_pos + self.action * self._action_scale
         self._joint_command.position = action_pos.tolist()
-        self._joint_command.velocity = np.zeros(len(self.joint_names)).tolist()
-        self._joint_command.effort = np.zeros(len(self.joint_names)).tolist()
+        self._joint_command.velocity = np.zeros(self.NUM_JOINTS).tolist()
+        self._joint_command.effort = np.zeros(self.NUM_JOINTS).tolist()
         self._joint_publisher.publish(self._joint_command)
 
     def _compute_observation(self, joint_state: JointState, imu: Imu):
         """Compute the policy observation vector from robot state.
 
         Constructs a 171-dimensional observation vector from robot sensor data:
-        - Linear velocity (body frame): 3
-        - Angular velocity (body frame): 3
-        - Gravity direction (body frame): 3
-        - Command velocity: 3
-        - Joint positions (relative to default): 53
-        - Joint velocities: 53
-        - Previous action: 53
+        - Linear velocity (body frame)               [0:3]    (3)
+        - Angular velocity (body frame)               [3:6]    (3)
+        - Gravity direction (body frame)              [6:9]    (3)
+        - Command velocity                            [9:12]   (3)
+        - Joint positions relative to default         [12:65]  (53)
+        - Joint velocities                            [65:118] (53)
+        - Previous action                             [118:171](53)
 
         Args:
             joint_state: Current joint positions and velocities
@@ -298,7 +288,8 @@ class G1FullbodyController(Node):
         quat_I = imu.orientation
         quat_array = np.array([quat_I.w, quat_I.x, quat_I.y, quat_I.z])
 
-        # Convert quaternion to rotation matrix (transpose for body to inertial frame)
+        # Convert quaternion to rotation matrix
+        # (transpose for body to inertial frame)
         R_BI = self.quat_to_rot_matrix(quat_array).T
 
         # Extract linear acceleration and integrate to estimate velocity
@@ -326,7 +317,7 @@ class G1FullbodyController(Node):
 
         # Fill observation vector components:
         # Base linear velocity (3)
-        obs[:3] = self._lin_vel_b
+        obs[0:3] = self._lin_vel_b
 
         # Base angular velocity (3)
         obs[3:6] = ang_vel_b
@@ -347,20 +338,20 @@ class G1FullbodyController(Node):
         current_joint_vel = np.zeros(self.NUM_JOINTS)
 
         # Map joint states from message to our ordered arrays
-        for i, name in enumerate(self.joint_names):
+        for i, name in enumerate(self.JOINT_NAMES):
             if name in joint_state.name:
                 idx = joint_state.name.index(name)
                 current_joint_pos[i] = joint_state.position[idx]
                 current_joint_vel[i] = joint_state.velocity[idx]
 
         # Store joint positions relative to default pose
-        obs[12:12+self.NUM_JOINTS] = current_joint_pos - self.default_pos
+        obs[12:65] = current_joint_pos - self.default_pos
 
         # Store joint velocities
-        obs[12+self.NUM_JOINTS:12+2*self.NUM_JOINTS] = current_joint_vel
+        obs[65:118] = current_joint_vel
 
         # Store previous actions
-        obs[12+2*self.NUM_JOINTS:] = self._previous_action
+        obs[118:171] = self._previous_action
 
         return obs
 
@@ -368,10 +359,10 @@ class G1FullbodyController(Node):
         """Run the neural network policy to compute an action from the observation.
 
         Args:
-            obs: Observation vector containing robot state information
+            obs: 171-dim observation vector containing robot state information
 
         Returns:
-            np.ndarray: Action vector containing joint position adjustments
+            np.ndarray: 53-dim action vector containing joint position adjustments
         """
         # Run inference with the PyTorch policy
         with torch.no_grad():
@@ -424,12 +415,13 @@ class G1FullbodyController(Node):
 
     def load_policy(self):
         """Load the neural network policy from the specified path."""
+        self._logger.info(f"Loading policy from: {self.policy_path}")
         # Load policy from file to io.BytesIO object
         with open(self.policy_path, 'rb') as f:
             buffer = io.BytesIO(f.read())
         # Load TorchScript model from buffer
         self.policy = torch.jit.load(buffer)
-        self._logger.info(f"Loaded policy from: {self.policy_path}")
+        self._logger.info("Policy loaded successfully")
 
     def _get_stamp_prefix(self) -> str:
         """Create a timestamp prefix for logging with both system and ROS time.
