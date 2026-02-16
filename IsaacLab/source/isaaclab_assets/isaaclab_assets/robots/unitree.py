@@ -16,6 +16,7 @@ The following configurations are available:
 * :obj:`G1_MINIMAL_CFG`: G1 humanoid robot with minimal collision bodies
 * :obj:`G1_29DOF_CFG`: G1 humanoid robot configured for locomanipulation tasks
 * :obj:`G1_INSPIRE_FTP_CFG`: G1 29DOF humanoid robot with Inspire 5-finger hand
+* :obj:`G1_INSPIRE_LOCOMOTION_CFG`: G1 humanoid robot with Inspire hands for locomotion
 
 Reference: https://github.com/unitreerobotics/unitree_ros
 """
@@ -609,3 +610,117 @@ G1_INSPIRE_FTP_CFG.actuators["hands"] = ImplicitActuatorCfg(
     damping=0.2,
     armature=0.001,
 )
+
+
+##
+# G1 Inspire Locomotion Configuration
+##
+
+G1_INSPIRE_LOCOMOTION_CFG = ArticulationCfg(
+    spawn=sim_utils.UsdFileCfg(
+        usd_path=f"{ISAACLAB_NUCLEUS_DIR}/Robots/Unitree/G1/g1_29dof_inspire_hand_floating.usd",
+        activate_contact_sensors=True,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=False,
+            retain_accelerations=False,
+            linear_damping=0.0,
+            angular_damping=0.0,
+            max_linear_velocity=1000.0,
+            max_angular_velocity=1000.0,
+            max_depenetration_velocity=1.0,
+        ),
+        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            enabled_self_collisions=False,
+            fix_root_link=False,
+            solver_position_iteration_count=8,
+            solver_velocity_iteration_count=4,
+        ),
+    ),
+    init_state=ArticulationCfg.InitialStateCfg(
+        pos=(0.0, 0.0, 0.74),
+        joint_pos={
+            ".*_hip_pitch_joint": -0.20,
+            ".*_knee_joint": 0.42,
+            ".*_ankle_pitch_joint": -0.23,
+            ".*_elbow_pitch_joint": 0.87,
+            "left_shoulder_roll_joint": 0.16,
+            "left_shoulder_pitch_joint": 0.35,
+            "right_shoulder_roll_joint": -0.16,
+            "right_shoulder_pitch_joint": 0.35,
+        },
+        joint_vel={".*": 0.0},
+    ),
+    soft_joint_pos_limit_factor=0.9,
+    actuators={
+        "legs": ImplicitActuatorCfg(
+            joint_names_expr=[
+                ".*_hip_yaw_joint",
+                ".*_hip_roll_joint",
+                ".*_hip_pitch_joint",
+                ".*_knee_joint",
+                "torso_joint",
+            ],
+            effort_limit_sim=300,
+            stiffness={
+                ".*_hip_yaw_joint": 150.0,
+                ".*_hip_roll_joint": 150.0,
+                ".*_hip_pitch_joint": 200.0,
+                ".*_knee_joint": 200.0,
+                "torso_joint": 200.0,
+            },
+            damping={
+                ".*_hip_yaw_joint": 5.0,
+                ".*_hip_roll_joint": 5.0,
+                ".*_hip_pitch_joint": 5.0,
+                ".*_knee_joint": 5.0,
+                "torso_joint": 5.0,
+            },
+            armature={
+                ".*_hip_.*": 0.01,
+                ".*_knee_joint": 0.01,
+                "torso_joint": 0.01,
+            },
+        ),
+        "feet": ImplicitActuatorCfg(
+            effort_limit_sim=20,
+            joint_names_expr=[".*_ankle_pitch_joint", ".*_ankle_roll_joint"],
+            stiffness=20.0,
+            damping=2.0,
+            armature=0.01,
+        ),
+        "arms": ImplicitActuatorCfg(
+            joint_names_expr=[
+                ".*_shoulder_pitch_joint",
+                ".*_shoulder_roll_joint",
+                ".*_shoulder_yaw_joint",
+                ".*_elbow_pitch_joint",
+                ".*_elbow_roll_joint",
+            ],
+            effort_limit_sim=300,
+            stiffness=40.0,
+            damping=10.0,
+            armature=0.01,
+        ),
+        "hands": ImplicitActuatorCfg(
+            joint_names_expr=[
+                ".*_index_.*",
+                ".*_middle_.*",
+                ".*_thumb_.*",
+                ".*_ring_.*",
+                ".*_pinky_.*",
+            ],
+            effort_limit_sim=30.0,
+            velocity_limit_sim=10.0,
+            stiffness=10.0,
+            damping=0.2,
+            armature=0.001,
+        ),
+    },
+)
+"""Configuration for the Unitree G1 Humanoid robot with Inspire hands for locomotion.
+
+Floating-base configuration with gravity enabled for locomotion training.
+Uses the same leg/feet PD gains as G1_CFG, with reduced arm stiffness (40 vs 3000)
+to allow natural arm swing during walking. Hand joints are included but with low
+stiffness to remain passive during locomotion.
+"""
