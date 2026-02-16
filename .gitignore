@@ -218,3 +218,6 @@ IsaacSim-ros_workspaces/build_ws/humble
 .*.pyc
 
 env_isaaclab/
+build*
+install*
+log*
