@@ -50,18 +50,8 @@ class G1FlatPPORunnerCfg(G1RoughPPORunnerCfg):
 
 
 @configclass
-class G1InspireFlatPPORunnerCfg(G1RoughPPORunnerCfg):
-    """PPO config for G1 Inspire flat locomotion, tuned per literature best practices."""
-
+class G1InspireFlatPPORunnerCfg(G1FlatPPORunnerCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        self.max_iterations = 5000
         self.experiment_name = "g1_inspire_flat"
-        self.save_interval = 100
-        # Full-size network for 53-joint robot
-        self.policy.actor_hidden_dims = [512, 256, 128]
-        self.policy.critic_hidden_dims = [512, 256, 128]
-        # Learning rate: 5e-4 (literature standard, down from 1e-3)
-        self.algorithm.learning_rate = 5.0e-4
-        self.algorithm.desired_kl = 0.01

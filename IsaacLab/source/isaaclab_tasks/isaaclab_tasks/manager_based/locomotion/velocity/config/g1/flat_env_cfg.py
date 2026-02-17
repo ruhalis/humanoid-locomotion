@@ -16,7 +16,6 @@ from .rough_env_cfg import G1RoughEnvCfg
 ##
 # Pre-defined configs
 ##
-from isaaclab_assets import G1_INSPIRE_LOCOMOTION_CFG  # isort: skip
 
 
 @configclass
@@ -84,26 +83,26 @@ class G1InspireRewards(RewardsCfg):
 
     termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
 
-    # -- Task rewards: tighter tracking with std=0.25 (community standard) --
+    # -- Task rewards: strong tracking signal to overcome penalty local minimum --
     track_lin_vel_xy_exp = RewTerm(
         func=mdp.track_lin_vel_xy_yaw_frame_exp,
-        weight=1.0,
-        params={"command_name": "base_velocity", "std": 0.25},
+        weight=3.0,
+        params={"command_name": "base_velocity", "std": 0.5},
     )
     track_ang_vel_z_exp = RewTerm(
         func=mdp.track_ang_vel_z_world_exp,
-        weight=0.5,
-        params={"command_name": "base_velocity", "std": 0.25},
+        weight=1.5,
+        params={"command_name": "base_velocity", "std": 0.5},
     )
 
     # -- Gait shaping: the essential terms for bipedal walking --
     feet_air_time = RewTerm(
         func=mdp.feet_air_time_positive_biped,
-        weight=1.0,
+        weight=2.0,
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
-            "threshold": 0.4,
+            "threshold": 0.3,
         },
     )
     feet_slide = RewTerm(
@@ -116,12 +115,12 @@ class G1InspireRewards(RewardsCfg):
     )
 
     # -- Balance and posture --
-    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
+    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-0.5)
     ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-1.0)
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-0.5)
     base_height_l2 = RewTerm(
         func=mdp.base_height_l2,
-        weight=-1.0,
+        weight=-0.5,
         params={"target_height": 0.74},
     )
 
@@ -172,11 +171,13 @@ class G1InspireRewards(RewardsCfg):
             "asset_cfg": SceneEntityCfg(
                 "robot",
                 joint_names=[
-                    ".*_index_.*",
-                    ".*_middle_.*",
-                    ".*_thumb_.*",
-                    ".*_ring_.*",
-                    ".*_pinky_.*",
+                    ".*_five_joint",
+                    ".*_three_joint",
+                    ".*_six_joint",
+                    ".*_four_joint",
+                    ".*_zero_joint",
+                    ".*_one_joint",
+                    ".*_two_joint",
                 ],
             )
         },
@@ -207,10 +208,7 @@ class G1InspireFlatEnvCfg(G1RoughEnvCfg):
         # post init of parent
         super().__post_init__()
 
-        # -- Scene: G1 Inspire floating base --
-        self.scene.robot = G1_INSPIRE_LOCOMOTION_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-
-        # -- Flat terrain --
+        # -- Flat terrain (robot is G1_MINIMAL_CFG from parent G1RoughEnvCfg) --
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
         self.scene.height_scanner = None
@@ -223,8 +221,8 @@ class G1InspireFlatEnvCfg(G1RoughEnvCfg):
         # -- Re-apply reward weights that parent __post_init__ may have overridden --
         # Parent G1RoughEnvCfg sets lin_vel_z_l2=0.0, action_rate_l2=-0.005, etc.
         # We want our G1InspireRewards class-level values instead.
-        self.rewards.lin_vel_z_l2.weight = -2.0
-        self.rewards.flat_orientation_l2.weight = -1.0
+        self.rewards.lin_vel_z_l2.weight = -0.5
+        self.rewards.flat_orientation_l2.weight = -0.5
         self.rewards.action_rate_l2.weight = -0.01
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_torques_l2.params["asset_cfg"] = SceneEntityCfg(
@@ -275,10 +273,10 @@ class G1InspireFlatEnvCfg(G1RoughEnvCfg):
             },
         }
 
-        # -- Commands --
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (-0.5, 0.5)
-        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        # -- Commands: minimum forward vel > 0 so robot must always walk --
+        self.commands.base_velocity.ranges.lin_vel_x = (0.3, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.3, 0.3)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
 
         # -- Terminations --
         self.terminations.base_contact.params["sensor_cfg"].body_names = "torso_link"
