@@ -1,0 +1,6 @@
+image: Rabotai.png
+resolution: 0.05
+origin: [-0.02500000074505806, -19.175000762939455, 0.0000]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196

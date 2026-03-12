@@ -207,14 +207,18 @@ marimo/_lsp/
 __marimo__/
 
 # IsaacSim ROS workspaces
-IsaacSim-ros_workspaces/humble_ws/build
-IsaacSim-ros_workspaces/humble_ws/install
-IsaacSim-ros_workspaces/humble_ws/log
-IsaacSim-ros_workspaces/jazzy_ws/build
-IsaacSim-ros_workspaces/jazzy_ws/install
-IsaacSim-ros_workspaces/jazzy_ws/log
+humble_ws/build
+humble_ws/install
+humble_ws/log
+jazzy_ws/build
+jazzy_ws/install
+jazzy_ws/log
 IsaacSim-ros_workspaces/build_ws/jazzy
 IsaacSim-ros_workspaces/build_ws/humble
 .*.pyc
 
 env_isaaclab/
+IsaacLab/logs/*
+IsaacLab/outputs/*
+IsaacLab/scripts/reinforcement_learning/rsl_rl/logs/*
+IsaacLab/scripts/reinforcement_learning/rsl_rl/outputs/*
