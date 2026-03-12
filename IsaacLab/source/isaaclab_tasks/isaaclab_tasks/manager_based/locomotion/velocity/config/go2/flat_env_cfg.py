@@ -3,7 +3,11 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
+
+import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 
 from .rough_env_cfg import UnitreeGo2RoughEnvCfg
 
@@ -17,6 +21,12 @@ class UnitreeGo2FlatEnvCfg(UnitreeGo2RoughEnvCfg):
         # override rewards
         self.rewards.flat_orientation_l2.weight = -2.5
         self.rewards.feet_air_time.weight = 0.25
+        # reward for maintaining base height
+        self.rewards.base_height_l2 = RewTerm(
+            func=mdp.base_height_l2,
+            weight=-1.0,
+            params={"target_height": 0.34, "asset_cfg": SceneEntityCfg("robot")},
+        )
 
         # change terrain to flat
         self.scene.terrain.terrain_type = "plane"
